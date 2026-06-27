@@ -1,0 +1,27 @@
+
+# Runtime and secrets
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+*.sqlite
+*.sqlite3
+*.db
+*.db-*
+data/
+sessions/
+accounts/
+downloads/
+logs/
+backups/
+tmp/
+secrets/
+profiles/
+venv/
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+._*
+.DS_Store
