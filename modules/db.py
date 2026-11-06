@@ -16,7 +16,7 @@ class Account(Base):
 
     id = Column(Integer, primary_key=True)
     owner = Column(Integer, nullable=False)
-    phone = "<REDACTED>"
+    phone = Column(String)
     username = Column(String)
     name = Column(String)
     is_started = Column(Boolean, default=False)
@@ -113,7 +113,7 @@ class Account(Base):
             id=id,
             owner=owner_id,
             username=username,
-            phone="<REDACTED>"
+            phone=phone,
             name=name,
             config=config
         )
@@ -614,7 +614,10 @@ class Analytics(Base):
 
 
 # Настройка базы данных
-engine = create_engine('sqlite:///database.db')
+engine = create_engine('sqlite:///database.db', connect_args={'timeout': 30})
+with engine.connect() as connection:
+    connection.exec_driver_sql('PRAGMA journal_mode=WAL')
+    connection.exec_driver_sql('PRAGMA busy_timeout=30000')
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 session = Session()

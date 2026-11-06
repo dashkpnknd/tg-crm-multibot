@@ -57,7 +57,8 @@ def get_accounts_kb(user_id, page, accounts_per_page=10):
 
     # Добавляем кнопку "Добавить аккаунт"
     keyboard.append([InlineKeyboardButton("Добавить аккаунт ➕", callback_data="add_account")])
-    keyboard.append([InlineKeyboardButton("Массовая настройка ⚙️", callback_data="bulk_settings")])
+    keyboard.append([InlineKeyboardButton("Массовая настройка ЛС ✉️", callback_data="bulk_sender")])
+    keyboard.append([InlineKeyboardButton("Массовая настройка историй ⚙️", callback_data="bulk_settings")])
     keyboard.append([InlineKeyboardButton("Главное меню 🔙", callback_data="main_menu")])
 
     return InlineKeyboardMarkup(keyboard)

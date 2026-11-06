@@ -1,7 +1,9 @@
 import asyncio
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from pyrogram import Client
+from pyrogram import Client, raw
 from pyrogram.errors import FloodWait, RPCError, AuthKeyUnregistered, SessionRevoked, UserDeactivated
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -41,6 +43,17 @@ def normalize_channel_id(text):
     return f"@{value}"
 
 
+def parse_channel_ids(value):
+    """Accept the old single channel value and comma separated channel lists."""
+    values = value if isinstance(value, (list, tuple)) else str(value or "").replace("\n", ",").split(",")
+    channels = []
+    for item in values:
+        channel = normalize_channel_id(str(item))
+        if channel and channel not in channels:
+            channels.append(channel)
+    return channels
+
+
 def channel_label(channel_id):
     return str(channel_id) if channel_id else "Не указан"
 
@@ -53,23 +66,14 @@ async def send_story_to_channel(app, channel_id, story, media, caption, publish_
     if not channel_id:
         return None
 
-    try:
-        return await app.send_story(
-            channel_id,
-            media=media,
-            caption=caption,
-            period=publish_period,
-            pinned=False,
-            protect_content=protect_content
-        )
-    except Exception as story_error:
-        print(f"[story_cloner/{app.me.id}] Не удалось отправить историю в канал {channel_id}: {story_error}. Пробую постом.")
-
-    if story.photo:
-        return await app.send_photo(channel_id, media, caption=caption, protect_content=protect_content)
-    if story.video:
-        return await app.send_video(channel_id, media, caption=caption, protect_content=protect_content)
-    return None
+    return await app.send_story(
+        channel_id,
+        media=media,
+        caption=caption,
+        period=publish_period,
+        pinned=False,
+        protect_content=protect_content
+    )
 
 def get_story_cloner_kb(account: db.Account):
     config = account.config or {}
@@ -169,7 +173,7 @@ async def set_copy_channel(client: Client, callback_query: CallbackQuery):
     current_channel = channel_label(config.get("copy_channel_id", ""))
     text = (
         f"<b>Текущий канал:</b> <code>{current_channel}</code>\n\n"
-        "Введите id канала вида <code>-100...</code> или username канала.\n"
+        "Введите ID или username каналов через запятую.\n"
         "Чтобы убрать канал, отправьте <code>-</code>."
     )
     await send_msg(text, get_back_kb('Отмена', 'story_cloner'), callback_query.message)
@@ -183,9 +187,9 @@ async def process_copy_channel(client: Client, message: Message):
     account_id = data.get('open_account')
     account = db.Account.get_by_id(account_id)
     config = account.config or {}
-    channel_id = normalize_channel_id(message.text)
-    config["copy_channel_id"] = channel_id
-    config["copy_to_channel_enabled"] = bool(channel_id)
+    channel_ids = parse_channel_ids(message.text)
+    config["copy_channel_id"] = ", ".join(map(str, channel_ids))
+    config["copy_to_channel_enabled"] = bool(channel_ids)
     db.Account.update_by_id(account_id, config=config)
     fms.reset_state(user_id)
     account = db.Account.get_by_id(account_id)
@@ -245,7 +249,7 @@ async def toggle_delete_original(client: Client, callback_query: CallbackQuery):
 @Client.on_callback_query(data_filter('set_publish_duration'))
 async def set_publish_duration(client: Client, callback_query: CallbackQuery):
     await callback_query.answer()
-    
+
     user_id = callback_query.from_user.id
     data = fms.get_data(user_id)
     account_id = data.get('open_account')
@@ -253,28 +257,28 @@ async def set_publish_duration(client: Client, callback_query: CallbackQuery):
 
     # Определяем последовательность значений
     durations = [6, 12, 24, 48]
-    
+
     # Получаем текущее значение или используем 24 по умолчанию
     config = account.config or {}
     current_duration = config.get("publish_duration", 24)
-    
+
     # Находим индекс текущего значения и вычисляем следующее по кругу
     try:
         current_index = durations.index(current_duration)
     except ValueError:
         current_index = 2  # индекс для 24 (значение по умолчанию)
-    
+
     new_duration = durations[(current_index + 1) % len(durations)]
-    
+
     # Сохраняем новое значение
     config["publish_duration"] = new_duration
     db.Account.update_by_id(account_id, config=config)
-    
+
     # Обновляем интерфейс с новой клавиатурой (кнопка будет отображать новое значение)
     await send_msg(cloner_text, get_story_cloner_kb(account), callback_query.message)
-    
+
     # Подтверждаем нажатие без уведомления
-    
+
 
 
 @Client.on_callback_query(data_filter('toggle_skip_at'))
@@ -517,7 +521,7 @@ async def bulk_set_copy_channel(client: Client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
     fms.set_state(user_id, 'awaiting_bulk_copy_channel')
     await send_msg(
-        "Введите канал для репоста: id <code>-100...</code> или username.\nЧтобы убрать канал, отправьте <code>-</code>.",
+        "Введите ID или username каналов через запятую.\nЧтобы убрать все каналы, отправьте <code>-</code>.",
         get_back_kb('Отмена', 'bulk_settings'),
         callback_query.message
     )
@@ -526,10 +530,10 @@ async def bulk_set_copy_channel(client: Client, callback_query: CallbackQuery):
 @Client.on_message(state_filter("awaiting_bulk_copy_channel"))
 async def process_bulk_copy_channel(client: Client, message: Message):
     user_id = message.from_user.id
-    channel_id = normalize_channel_id(message.text)
+    channel_ids = parse_channel_ids(message.text)
     fms.update_data(user_id, {
-        "bulk_copy_channel_id": channel_id,
-        "bulk_copy_to_channel_enabled": bool(channel_id)
+        "bulk_copy_channel_id": ", ".join(map(str, channel_ids)),
+        "bulk_copy_to_channel_enabled": bool(channel_ids)
     })
     fms.reset_state(user_id)
     data = fms.get_data(user_id)
@@ -776,17 +780,71 @@ async def story_cloner_work(app: Client):
         """, (my_story_id, user_id, story_id))
         await app.storage.save()
 
-    async def forget_reserved_story(user_id, story_id):
+    async def reserve_channel_story(user_id, story_id, channel_id):
         cursor.execute("""
-            DELETE FROM stories WHERE user_id = ? AND story_id = ? AND my_story_id = 0;
-        """, (user_id, story_id))
+            INSERT OR IGNORE INTO channel_stories (user_id, story_id, channel_id)
+            VALUES (?, ?, ?);
+        """, (user_id, story_id, str(channel_id)))
         await app.storage.save()
+        return cursor.rowcount > 0
+
+    async def run_story_api(coro):
+        async with app.story_api_lock:
+            return await coro
+
+    async def ensure_pin(story_id, config):
+        if not config.get("pin_copied_stories", False):
+            return
+        async with app.story_api_lock:
+            pinned = {int(x.id) async for x in app.get_pinned_stories("me")}
+            if int(story_id) not in pinned:
+                await app.pin_chat_stories("me", [int(story_id)])
+                pinned = {int(x.id) async for x in app.get_pinned_stories("me")}
+        if int(story_id) not in pinned:
+            raise RuntimeError("Telegram did not confirm story pin")
+
+    async def publish(story, file_id, period, config):
+        args = dict(chat_id="me", media=file_id, caption=story.caption, period=period, pinned=bool(config.get("pin_copied_stories", False)), protect_content=config.get("is_copy_prohibited", False))
+        try:
+            return await run_story_api(app.send_story(**args))
+        except RPCError as err:
+            if "MEDIA_FILE_INVALID" not in str(err):
+                raise
+            suffix = ".mp4" if getattr(story, "video", None) else ".jpg"
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                path = Path(tmp.name)
+            try:
+                media = await app.download_media(story, file_name=str(path))
+                if not media:
+                    raise RuntimeError("Source media download failed")
+                args["media"] = str(media)
+                return await run_story_api(app.send_story(**args))
+            finally:
+                path.unlink(missing_ok=True)
+
+    async def resolve_source(source):
+        source_name = str(source).strip().lstrip("@")
+        source_account = None
+        try:
+            source_account = db.Account.get_by_username(source_name)
+        except Exception:
+            source_account = None
+
+        if source_account:
+            if source_account.id == app.me.id:
+                return app.me
+            try:
+                return await run_story_api(app.get_users(source_account.id))
+            except RPCError:
+                pass
+
+        return await run_story_api(app.get_users(source))
 
     async def create_table():
         """Создает таблицу для хранения скопированных историй, если она не существует."""
         cursor.execute("""
-            SELECT name 
-            FROM sqlite_master 
+            SELECT name
+            FROM sqlite_master
             WHERE type='table' AND name='stories';
         """)
         if not cursor.fetchone():
@@ -811,13 +869,34 @@ async def story_cloner_work(app: Client):
             CREATE UNIQUE INDEX IF NOT EXISTS idx_stories_user_story
             ON stories (user_id, story_id);
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS channel_stories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                story_id INTEGER NOT NULL,
+                channel_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        cursor.execute("""
+            DELETE FROM channel_stories
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM channel_stories
+                GROUP BY user_id, story_id, channel_id
+            );
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_stories_user_story_channel
+            ON channel_stories (user_id, story_id, channel_id);
+        """)
         await app.storage.save()
 
     def get_posted_by_user(user_id):
         """Получает список уже опубликованных историй конкретного пользователя."""
         cursor.execute("""
-            SELECT story_id, my_story_id 
-            FROM stories 
+            SELECT story_id, my_story_id
+            FROM stories
             WHERE user_id = ?
         """, (user_id,))
         return {row[0]: row[1] for row in cursor.fetchall()}
@@ -826,7 +905,7 @@ async def story_cloner_work(app: Client):
         """Получает список уже опубликованных историй конкретного пользователя."""
         cursor.execute("""
             SELECT story_id
-            FROM stories 
+            FROM stories
             WHERE user_id = ? AND my_story_id = ?
         """, (user_id,my_story_id))
         result = [row[0] for row in cursor.fetchall()]
@@ -839,88 +918,203 @@ async def story_cloner_work(app: Client):
         """Получает ID файла из истории (фото или видео)."""
         return getattr(story.photo, 'file_id', None) or getattr(story.video, 'file_id', None)
 
+    def story_fingerprint(story):
+        """Return a stable, content-based fingerprint for a Telegram story.
+
+        Telegram can accept ``send_story`` and lose the network response.  In
+        that state the old worker recorded ``my_story_id=0`` and permanently
+        skipped the source story, which is why different accounts diverged.
+        ``file_unique_id`` survives a server-side copy and lets us recognise
+        the already-created target story before deciding whether a retry is
+        safe.  Caption is included to avoid confusing two uses of the same
+        media file.
+        """
+        photo = getattr(story, "photo", None)
+        video = getattr(story, "video", None)
+        media = photo or video
+        unique_id = getattr(media, "file_unique_id", None)
+        if not unique_id:
+            return None
+        kind = "photo" if photo else "video" if video else "media"
+        return kind, str(unique_id), (getattr(story, "caption", None) or "").strip()
+
+    async def reconcile_unconfirmed_story(user_id, source_story, posted_stories):
+        """Resolve a prior timed-out publish without creating a duplicate.
+
+        A zero target ID is a reservation left by an interrupted upload.  We
+        first scan the target's current stories for the same media/caption. If
+        found, the existing copy is recorded and no upload is made.  Only when
+        Telegram confirms that no such target story exists do we release the
+        stale reservation for a new attempt.
+        """
+        if posted_stories.get(source_story.id) != 0:
+            return True
+        fingerprint = story_fingerprint(source_story)
+        if not fingerprint:
+            print(
+                f"[story_cloner/{app.me.id}] История {source_story.id} ожидает ручной проверки: "
+                "у медиа нет file_unique_id, автоматический повтор выключен"
+            )
+            return False
+        async with app.story_api_lock:
+            own_stories = [story async for story in app.get_chat_stories("me")]
+        matches = [story for story in own_stories if story_fingerprint(story) == fingerprint]
+        if matches:
+            # Several equal stories still mean that this source story was
+            # already delivered; choosing one only repairs local bookkeeping.
+            target = max(matches, key=lambda story: int(story.id))
+            await mark_story_sent(user_id, source_story.id, target.id)
+            posted_stories[source_story.id] = target.id
+            print(
+                f"[story_cloner/{app.me.id}] Восстановлена отправка source={user_id} "
+                f"story={source_story.id} target={target.id}"
+            )
+            return True
+        cursor.execute(
+            "DELETE FROM stories WHERE user_id = ? AND story_id = ? AND my_story_id = 0",
+            (user_id, source_story.id),
+        )
+        await app.storage.save()
+        posted_stories.pop(source_story.id, None)
+        print(
+            f"[story_cloner/{app.me.id}] Подтверждено отсутствие target-story для source={user_id} "
+            f"story={source_story.id}; повторяю один раз"
+        )
+        return True
+
+    async def send_story_to_channel_once(user_obj, source_name, story, story_file_id, publish_period, config, blocked_channels):
+        channel_ids = parse_channel_ids(config.get("copy_channel_id"))
+        if not config.get("copy_to_channel_enabled", False) or not channel_ids:
+            return
+
+        for channel_id in channel_ids:
+            if channel_id in blocked_channels:
+                continue
+            try:
+                peer = await app.resolve_peer(channel_id)
+                await run_story_api(app.invoke(raw.functions.stories.CanSendStory(peer=peer)))
+            except RPCError as e:
+                if "BOOSTS_REQUIRED" in str(e):
+                    blocked_channels.add(channel_id)
+                    print(f"[story_cloner/{app.me.id}] Каналу {channel_id} нужен буст для историй; ожидаю доступ")
+                    continue
+                raise
+
+            # Reserve separately for each destination before the network call.
+            # A timed-out upload may have reached Telegram, so never retry it automatically.
+            if not await reserve_channel_story(user_obj.id, story.id, channel_id):
+                print(f"[story_cloner/{app.me.id}] История {story.id} из {user_obj.id} уже резервировалась для канала {channel_id}, пропускаю")
+                continue
+
+            print(f"[story_cloner/{app.me.id}] Отправляю историю {story.id} из {user_obj.id} в канал {channel_id}")
+            try:
+                await run_story_api(send_story_to_channel(
+                    app,
+                    channel_id,
+                    story,
+                    story_file_id,
+                    story.caption,
+                    publish_period,
+                    config.get("is_copy_prohibited", False)
+                ))
+                db.Analytics.create_record(
+                    app.me.id,
+                    'Скопировал историю в канал',
+                    details=f"Источник: {source_name}\nКанал: {channel_id}"
+                )
+            except Exception as e:
+                if isinstance(e, RPCError) and "BOOSTS_REQUIRED" in str(e):
+                    cursor.execute(
+                        "DELETE FROM channel_stories WHERE user_id = ? AND story_id = ? AND channel_id = ?",
+                        (user_obj.id, story.id, str(channel_id))
+                    )
+                    await app.storage.save()
+                    blocked_channels.add(channel_id)
+                    print(f"[story_cloner/{app.me.id}] Каналу {channel_id} нужен буст для историй; отправка отложена")
+                else:
+                    print(f"[story_cloner/{app.me.id}] Неопределённый результат репоста в канал {channel_id}; автоповтор выключен: {e}")
+
     await create_table()
 
     while True:
         try:
             account = db.Account.get_by_id(app.me.id)
             config = account.config or {}
+            blocked_channels = set()
+            copy_to_account_enabled = config.get('is_copying_enabled', False)
+            copy_to_channel_enabled = config.get("copy_to_channel_enabled", False) and bool(parse_channel_ids(config.get("copy_channel_id")))
 
-            if not config.get('copy_from_accounts') or not config.get('is_copying_enabled'):
+            if not config.get('copy_from_accounts') or not (copy_to_account_enabled or copy_to_channel_enabled):
                 await asyncio.sleep(60)
                 continue
 
             for user in config.get('copy_from_accounts'):
                 try:
-                    user_obj = await app.get_users(user)
-                    if user_obj.id == app.me.id:
+                    user_obj = await resolve_source(user)
+                    is_self_source = user_obj.id == app.me.id
+                    if is_self_source and not copy_to_channel_enabled:
                         print(f"[story_cloner/{app.me.id}] Пропускаю источник {user}: аккаунт не копирует сам себя")
                         continue
 
                     posted_stories = get_posted_by_user(user_obj.id)
                     user_stories_id = []
 
-                    async for story in app.get_chat_stories(user_obj.id):
+                    async with app.story_api_lock:
+                        source_stories = [story async for story in app.get_chat_stories(user_obj.id)]
+
+                    for story in source_stories:
                         user_stories_id.append(story.id)
                         if config.get("skip_stories_with_at", False) and story.caption and '@' in story.caption:
-                            continue
-
-                        if story.id in posted_stories:
                             continue
 
                         story_file_id = get_file_id(story)
                         if not story_file_id:
                             continue
 
-                        if not await reserve_story(user_obj.id, story.id):
-                            continue
-
                         publish_period = config.get("publish_duration", 24) * 3600  # В секундах
-                        try:
-                            new_story = await app.send_story(
-                                'me',
-                                media=story_file_id,
-                                caption=story.caption,
-                                period=publish_period,
-                                pinned=True,
-                                protect_content=config.get("is_copy_prohibited", False)
-                            )
-                        except Exception:
-                            await forget_reserved_story(user_obj.id, story.id)
-                            raise
+                        copied_to_account = False
 
-                        channel_id = config.get("copy_channel_id")
-                        if config.get("copy_to_channel_enabled", False) and channel_id:
-                            try:
-                                await send_story_to_channel(
-                                    app,
-                                    channel_id,
-                                    story,
-                                    story_file_id,
-                                    story.caption,
-                                    publish_period,
-                                    config.get("is_copy_prohibited", False)
-                                )
-                                db.Analytics.create_record(
-                                    app.me.id,
-                                    'Скопировал историю в канал',
-                                    details=f"Источник: {user}\nКанал: {channel_id}"
-                                )
-                            except Exception as e:
-                                print(f"[story_cloner/{app.me.id}] Ошибка репоста в канал {channel_id}: {e}")
+                        # A network failure after Telegram accepted an upload
+                        # leaves a zero-ID reservation.  Reconcile it before
+                        # retrying so every source story remains single-copy.
+                        if posted_stories.get(story.id) == 0:
+                            if not await reconcile_unconfirmed_story(user_obj.id, story, posted_stories):
+                                continue
 
-                        db.Analytics.create_record(
-                            app.me.id,
-                            'Скопировал историю',
-                            details=f"Источник: {user}"
+                        if copy_to_account_enabled and not is_self_source:
+                            target_id = int(posted_stories.get(story.id, 0) or 0)
+                            if target_id:
+                                await ensure_pin(target_id, config)
+                            elif story.id not in posted_stories and await reserve_story(user_obj.id, story.id):
+                                try:
+                                    new_story = await publish(story, story_file_id, publish_period, config)
+                                except Exception as error:
+                                    print(f"[story_cloner/{app.me.id}] send unresolved source={user_obj.id} story={story.id}: {error}")
+                                    raise
+                                await mark_story_sent(user_obj.id, story.id, new_story.id)
+                                await ensure_pin(new_story.id, config)
+                                db.Analytics.create_record(app.me.id, "Скопировал историю", details=f"Источник: {user}")
+                                copied_to_account = True
+
+
+                        await send_story_to_channel_once(
+                            user_obj,
+                            user,
+                            story,
+                            story_file_id,
+                            publish_period,
+                            config,
+                            blocked_channels
                         )
-
-                        await mark_story_sent(user_obj.id, story.id, new_story.id)
-                        await asyncio.sleep(60)
+                        if copied_to_account:
+                            await asyncio.sleep(60)
 
                     if config.get('delete_if_original_deleted', False):
 
-                        async for story in app.get_chat_stories('me'):
+                        async with app.story_api_lock:
+                            own_stories = [story async for story in app.get_chat_stories('me')]
+
+                        for story in own_stories:
                             original_story_id = get_original_story_ids_by_user_and_my_story(user_obj.id, story.id)
                             if not original_story_id:
                                 continue
@@ -931,21 +1125,21 @@ async def story_cloner_work(app: Client):
                             if story.expire_date - datetime.now() < timedelta(hours=1):
                                 continue
 
-                            await story.delete()
+                            await run_story_api(story.delete())
                             await asyncio.sleep(60)
 
                 except FloodWait as e:
                     print(f"FloodWait error: Sleeping for {e.value} seconds.")
                     await asyncio.sleep(e.value)
                 except RPCError as e:
-                    print(f"RPCError: {e}")
+                    print(f"[story_cloner/{app.me.id}] RPCError source={user}: {e}")
                     await asyncio.sleep(60)
                 except (AuthKeyUnregistered, SessionRevoked, UserDeactivated) as e:
                     print('Слетела авторизация')
                     await modules.accounts_storage.de_launch_account(app.me.id)
                     return
                 except Exception as e:
-                    print(f"Unexpected error: {e}")
+                    print(f"[story_cloner/{app.me.id}] Unexpected error source={user}: {e}")
                     await asyncio.sleep(60)
 
         except Exception as e:

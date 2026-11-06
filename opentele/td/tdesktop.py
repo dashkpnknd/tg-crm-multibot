@@ -476,7 +476,7 @@ class TDesktop(BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
     ) -> tl.TelegramClient:
         """
         
@@ -518,7 +518,7 @@ class TDesktop(BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         *,
         connection: typing.Type[Connection] = ConnectionTcpFull,
         use_ipv6: bool = False,
@@ -543,7 +543,7 @@ class TDesktop(BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         **kwargs
     ) -> tl.TelegramClient:
 
@@ -562,7 +562,7 @@ class TDesktop(BaseObject):
             session=session,
             flag=flag,
             api=api,
-            password="<REDACTED>"
+            password=password,
             **kwargs
         )
 
@@ -571,7 +571,7 @@ class TDesktop(BaseObject):
         telethonClient: tl.TelegramClient,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
     ) -> TDesktop:
         """
         Create an instance of `TDesktop` from `TelegramClient`.

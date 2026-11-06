@@ -1,0 +1,6 @@
+pyrofork==2.3.69
+Telethon==1.42.0
+SQLAlchemy==2.0.45
+TgCrypto==1.2.5
+PyQt5==5.15.11
+openpyxl==3.1.5

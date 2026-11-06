@@ -1,3 +1,4 @@
+from runtime_config import LOG_CHAT_ID
 import asyncio
 import html
 import inspect
@@ -113,7 +114,7 @@ async def toggle_chat_in_list(client: Client, callback_query: CallbackQuery):
     account_id = data.get('open_account')
     account = db.Account.get_by_id(account_id)
     config = account.config or {}
-    chat_id = "<REDACTED>"
+    chat_id = int(callback_query.data.split('_')[2])
     chat_ids = config.get("chat_sender_chat_ids", [])
     if chat_id in chat_ids:
         chat_ids.remove(chat_id)
@@ -376,8 +377,6 @@ async def select_source_account(client: Client, callback_query: CallbackQuery):
     await callback_query.answer("✅ Настройки скопированы", show_alert=True)
     await send_msg(text, get_chat_sender_kb(target_account), callback_query.message)
 
-
-LOG_CHAT_ID = -1002225165206
 
 async def my_log(log_text):
     msg = None

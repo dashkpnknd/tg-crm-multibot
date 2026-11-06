@@ -112,7 +112,7 @@ async def wait_chat_username(client: Client, message: Message):
 async def delete_chat(client: Client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
     data = fms.get_data(user_id)
-    chat_id = "<REDACTED>"
+    chat_id = int(callback_query.data.split('_')[-1])
     chats_page = data.get('chats_page')
 
     if not chat_id:

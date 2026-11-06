@@ -1,3 +1,4 @@
+from runtime_config import BOT_TOKEN, BOT_API_HASH
 import asyncio
 import datetime
 import logging
@@ -7,7 +8,7 @@ from pyrogram.errors import UserIsBlocked
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 
 from modules.FMS import fms
-from modules.accounts_storage import initialize_active_accounts
+from modules.accounts_storage import initialize_active_accounts, watch_external_accounts
 from modules.filters import data_filter
 from modules.message import send_msg
 from modules import db, reporter
@@ -16,22 +17,21 @@ from plugins.accounts import get_accounts_kb
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-PROXY_CONFIG = {
-        "scheme": "http",       # Для порта 8000 обычно используется http
-        "hostname": "196.18.9.158",
-        "port": 8000,
-        "username": "XApV9A",
-        "password": "0Kgd3x"
-    }
-
 bot = Client('bot',
-             bot_token="<REDACTED>"
-             api_hash="<REDACTED>"
-             api_id="<REDACTED>"
+             bot_token=BOT_TOKEN,
+             api_hash=BOT_API_HASH,
+             api_id=6,
              parse_mode=enums.ParseMode.HTML,
-             plugins=dict(root="plugins"),
-             proxy=PROXY_CONFIG
+             # Load the known plugins explicitly.  The default recursive
+             # scanner treats editor/backup files such as ``._foo.py`` or
+             # ``foo.py.before-fix`` as importable plugins and can prevent
+             # the whole CRM from starting.
+             plugins=dict(root="plugins", include=[
+                 "accounts", "add_account", "chat_sender", "chats",
+                 "finishers", "full_story_cloner", "proxy",
+                 "selected_story_cloner", "sender", "story_cloner",
+                 "story_reactions",
+             ]),
             )
 
 
@@ -113,12 +113,13 @@ def start():
     while True:
         try:
             run(bot.start())
-            reporter.set_report_client(bot, '<TELEGRAM_BOT_TOKEN>')
+            reporter.set_report_client(bot, BOT_TOKEN)
             break
         except ConnectionError as e:
             logger.warning("Telegram connection failed while starting bot, retrying in 30 seconds: %s", e)
             run(asyncio.sleep(30))
     run(initialize_active_accounts())
+    loop.create_task(watch_external_accounts())
     run(update_messages())
     run(idle())
     run(bot.stop())

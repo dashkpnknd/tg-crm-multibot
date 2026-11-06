@@ -90,8 +90,8 @@ class APIData(object, metaclass=BaseAPIMetaClass):
 
     CustomInitConnectionList: List[Union[Type[APIData], APIData]] = []
 
-    api_id: "<REDACTED>"
-    api_hash: "<REDACTED>"
+    api_id: int = None  # type: ignore
+    api_hash: str = None  # type: ignore
     device_model: str = None  # type: ignore
     system_version: str = None  # type: ignore
     app_version: str = None  # type: ignore
@@ -106,8 +106,8 @@ class APIData(object, metaclass=BaseAPIMetaClass):
     @typing.overload
     def __init__(
         self,
-        api_id: "<REDACTED>"
-        api_hash: "<REDACTED>"
+        api_id: int,
+        api_hash: str,
         device_model: str = None,
         system_version: str = None,
         app_version: str = None,
@@ -152,8 +152,8 @@ class APIData(object, metaclass=BaseAPIMetaClass):
 
     def __init__(
         self,
-        api_id: "<REDACTED>"
-        api_hash: "<REDACTED>"
+        api_id: int = None,
+        api_hash: str = None,
         device_model: str = None,
         system_version: str = None,
         app_version: str = None,
@@ -350,8 +350,8 @@ class API(BaseObject):
             `Generate()`: Generate random device data for `Windows`, `macOS` and `Linux`
         """
 
-        api_id = "<REDACTED>"
-        api_hash = "<REDACTED>"
+        api_id = 2040
+        api_hash = "b18441a1ff607e10a989891a5462e627"
         device_model = "Desktop"
         system_version = "Windows 10"
         app_version = "3.4.3 x64"
@@ -455,8 +455,8 @@ class API(BaseObject):
             lang_pack (`str`)        : `"android"`
         """
 
-        api_id = "<REDACTED>"
-        api_hash = "<REDACTED>"
+        api_id = 6
+        api_hash = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
         device_model = "Samsung SM-G998B"
         system_version = "SDK 31"
         app_version = "8.4.1 (2522)"
@@ -480,8 +480,8 @@ class API(BaseObject):
             lang_pack (`str`)        : `"android"`
         """
 
-        api_id = "<REDACTED>"
-        api_hash = "<REDACTED>"
+        api_id = 21724
+        api_hash = "3e0cb5efcd52300aec5994fdfc5bdc16"
         device_model = "Samsung SM-G998B"
         system_version = "SDK 31"
         app_version = "8.4.1 (2522)"
@@ -507,8 +507,8 @@ class API(BaseObject):
 
         # api_id           = 8
         # api_hash         = "7245de8e747a0d6fbe11f7cc14fcc0bb"
-        api_id = "<REDACTED>"
-        api_hash = "<REDACTED>"
+        api_id = 10840
+        api_hash = "33c45224029d59cb3ad0c16134215aeb"
         device_model = "iPhone 13 Pro Max"
         system_version = "14.8.1"
         app_version = "8.4"
@@ -532,8 +532,8 @@ class API(BaseObject):
             lang_pack (`str`)        : `"macos"`
         """
 
-        api_id = "<REDACTED>"
-        api_hash = "<REDACTED>"
+        api_id = 2834
+        api_hash = "68875f756c9b437a8b916ca3de215815"
         # api_id = 9                                    |
         # api_hash = "3975f648bb682ee889f35483bc618d1c" | Telegram for macOS uses this api, but it"s unofficial api, why?
         device_model = "MacBook Pro"
@@ -559,8 +559,8 @@ class API(BaseObject):
             lang_pack (`str`)        : `""`
         """
 
-        api_id = "<REDACTED>"
-        api_hash = "<REDACTED>"
+        api_id = 2496
+        api_hash = "8da85b0d5bfe62527e5b244c209159c3"
         device_model = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
         system_version = "Windows"
         app_version = "1.28.3 Z"
@@ -585,8 +585,8 @@ class API(BaseObject):
             lang_pack (`str`)        : `"macos"`
         """
 
-        api_id = "<REDACTED>"
-        api_hash = "<REDACTED>"
+        api_id = 2496
+        api_hash = "8da85b0d5bfe62527e5b244c209159c3"
         device_model = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
         system_version = "Win32"
         app_version = "1.0.1 K"
@@ -610,8 +610,8 @@ class API(BaseObject):
             lang_pack (`str`)        : `""`
         """
 
-        api_id = "<REDACTED>"
-        api_hash = "<REDACTED>"
+        api_id = 2496
+        api_hash = "8da85b0d5bfe62527e5b244c209159c3"
         device_model = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
         system_version = "Win32"
         app_version = "0.7.0"

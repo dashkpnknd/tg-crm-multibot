@@ -1,3 +1,4 @@
+from runtime_config import ACCOUNT_API_HASH
 import base64
 import re
 import shutil
@@ -17,6 +18,25 @@ from opentele.td import TDesktop
 
 apps_buffer = {}
 code_input_buffer = {}
+
+
+def format_add_account_error(error):
+    text = str(error)
+    checks = [
+        ("PASSWORD_HASH_INVALID", "Неверный пароль двухэтапной проверки Telegram."),
+        ("PHONE_CODE_INVALID", "Неверный код из Telegram."),
+        ("PHONE_CODE_EXPIRED", "Код Telegram истек. Запросите новый код."),
+        ("PHONE_NUMBER_INVALID", "Некорректный номер телефона."),
+        ("PHONE_NUMBER_BANNED", "Этот номер заблокирован Telegram."),
+        ("FLOOD_WAIT", "Telegram временно ограничил попытки входа. Нужно подождать и попробовать позже."),
+        ("SESSION_REVOKED", "Сессия Telegram отозвана. Нужно авторизовать аккаунт заново."),
+        ("AUTH_KEY_UNREGISTERED", "Сессия Telegram слетела. Нужно авторизовать аккаунт заново."),
+    ]
+    for marker, message in checks:
+        if marker in text:
+            return f"⚠️ Ошибка: {message}"
+    return f"⚠️ Ошибка Telegram:\n{text[:900]}"
+
 
 def get_code_kb(user_id) -> InlineKeyboardMarkup:
     current_code = code_input_buffer.get(user_id, "")
@@ -111,8 +131,8 @@ async def wait_proxy(client: Client, message: Message):
         # Проверяем прокси
         test_client = Client(
             name="test_proxy",
-            api_id="<REDACTED>"
-            api_hash="<REDACTED>"
+            api_id=2040,
+            api_hash=ACCOUNT_API_HASH,
             proxy=proxy,
             in_memory=True
         )
@@ -200,8 +220,8 @@ async def wait_tdata(client: Client, message: Message):
 
     app = Client(
         name=f'app',
-        api_hash="<REDACTED>"
-        api_id="<REDACTED>"
+        api_hash=ACCOUNT_API_HASH,
+        api_id=2040,
         device_model='Desktop',
         system_version="Windows 11",
         app_version='5.7.2 x64',
@@ -230,7 +250,7 @@ async def wait_tdata(client: Client, message: Message):
             db.Account.create(id=me.id,
                               owner_id=message.from_user.id,
                               username=me.username,
-                              phone="<REDACTED>"
+                              phone=app.phone_number,
                               name=name,
                               config={'proxy': data.get('proxy')}
                               )
@@ -238,7 +258,7 @@ async def wait_tdata(client: Client, message: Message):
 
     except Exception as e:
         print(e)
-        await send_msg('⚠️ Ошибка', get_back_kb('Назад 🔙', 'accounts_'), message)
+        await send_msg(format_add_account_error(e), get_back_kb('Назад 🔙', 'accounts_'), message)
         fms.reset_state(message.from_user.id)
 
 
@@ -248,8 +268,8 @@ async def add_account_phone(client: Client, callback_query: CallbackQuery):
 
     app = Client(
         name='app',
-        api_hash="<REDACTED>"
-        api_id="<REDACTED>"
+        api_hash=ACCOUNT_API_HASH,
+        api_id=2040,
         device_model='Desktop',
         system_version="Windows 11",
         app_version='5.7.2 x64',
@@ -276,7 +296,7 @@ async def phone_number(client: Client, message: Message):
 
     await app.connect()
     try:
-        phone = "<REDACTED>"
+        phone = re.sub(r'[+\-\s()]+', '', message.text)
         code_info = await app.send_code(phone_number=phone)
         app.phone_number = phone
         app.code_info = code_info
@@ -354,7 +374,7 @@ async def code_confirm(client: Client, callback_query: CallbackQuery):
             db.Account.create(id=me.id,
                               owner_id=callback_query.from_user.id,
                               username=me.username,
-                              phone="<REDACTED>"
+                              phone=app.phone_number,
                               name=name,
                               config={'proxy': data.get('proxy')}
                               )
@@ -370,7 +390,7 @@ async def code_confirm(client: Client, callback_query: CallbackQuery):
 
     except Exception as e:
         print(e)
-        await send_msg('⚠️ Ошибка', get_back_kb('Назад 🔙', 'accounts_'), callback_query.message)
+        await send_msg(format_add_account_error(e), get_back_kb('Назад 🔙', 'accounts_'), callback_query.message)
         fms.reset_state(user_id)
         return
 
@@ -412,7 +432,7 @@ async def password(client: Client, message: Message):
             db.Account.create(id=me.id,
                               owner_id=message.from_user.id,
                               username=me.username,
-                              phone="<REDACTED>"
+                              phone=app.phone_number,
                               name=name,
                               config={'proxy': data.get('proxy')}
                               )
@@ -422,5 +442,5 @@ async def password(client: Client, message: Message):
         await app.stop()
     except Exception as e:
         print(e)
-        await send_msg('⚠️ Ошибка', get_back_kb('Назад 🔙', 'accounts_'), message)
+        await send_msg(format_add_account_error(e), get_back_kb('Назад 🔙', 'accounts_'), message)
         fms.reset_state(user_id)

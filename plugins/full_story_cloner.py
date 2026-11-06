@@ -1,4 +1,8 @@
 import asyncio
+import json
+import random
+import sqlite3
+from pathlib import Path
 from pyrogram import Client
 from pyrogram.errors import FloodWait, RPCError, AuthKeyUnregistered, SessionRevoked, UserDeactivated
 from pyrogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
@@ -7,6 +11,26 @@ from modules import db
 from modules.filters import *
 from modules.message import send_msg
 from plugins.add_account import get_back_kb
+
+
+DATABASE = Path(__file__).resolve().parent.parent / "database.db"
+
+
+def full_story_options(account_id: int, default_interval: int) -> tuple[int, int, bool]:
+    """Read per-account full-copy settings without changing legacy CRM jobs."""
+    with sqlite3.connect(DATABASE, timeout=30) as database:
+        row = database.execute("SELECT config FROM account WHERE id = ?", (account_id,)).fetchone()
+    try:
+        config = json.loads(row[0] or "{}") if row else {}
+    except (TypeError, json.JSONDecodeError):
+        config = {}
+    minimum = max(1, int(config.get("full_story_interval_min_minutes", default_interval)))
+    maximum = max(minimum, int(config.get("full_story_interval_max_minutes", minimum)))
+    # Existing Full CRM jobs retain their old behaviour. The setup bot's
+    # all-history mode explicitly opts out because only three stories can be
+    # pinned on a Telegram profile.
+    pinned = bool(config.get("full_story_pin_copied", True))
+    return minimum, maximum, pinned
 
 def get_full_story_cloner_kb(data):
     is_copy_prohibited = data.get("full_is_copy_prohibited", False)
@@ -176,37 +200,154 @@ async def full_story_cloner_work(app: Client):
     Модуль для полного копирования историй с заданным интервалом.
     Проверяет наличие задач в базе данных и выполняет их по очереди.
     """
+    async def restore_connection(reason: Exception) -> bool:
+        """Reconnect this account before retrying a durable story task.
+
+        Pyrogram can keep an object marked as connected after the underlying
+        TCP stream has been closed.  Without a forced reconnect, the old loop
+        simply retried the same dead client forever and no new history item
+        could leave the queue.
+        """
+        print(f"[full_story_cloner/{app.me.id}] Reconnecting after {type(reason).__name__}: {reason}")
+        for attempt in range(1, 4):
+            try:
+                if app.is_connected:
+                    await app.disconnect()
+                await asyncio.sleep(attempt)
+                await app.connect()
+                await app.get_me()
+                return True
+            except (AuthKeyUnregistered, SessionRevoked, UserDeactivated):
+                raise
+            except (RPCError, ConnectionError, OSError) as reconnect_error:
+                print(
+                    f"[full_story_cloner/{app.me.id}] Reconnect attempt {attempt}/3 failed: "
+                    f"{reconnect_error}"
+                )
+        return False
+
+    async def get_full_story_history(source):
+        """Return the source's full published-story history, newest first."""
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                stories = [story async for story in app.get_pinned_stories(source.id)]
+                # A story ID is allocated monotonically by Telegram for one
+                # source, while the date supplied in this API response is not
+                # reliable enough to order a batch. A higher ID is newer, and
+                # the project policy publishes the newest story first.
+                return sorted(stories, key=lambda story: story.id, reverse=True)
+            except (FloodWait, AuthKeyUnregistered, SessionRevoked, UserDeactivated):
+                raise
+            except (RPCError, ConnectionError, OSError) as error:
+                last_error = error
+                print(
+                    f"[full_story_cloner/{app.me.id}] Не удалось получить полную историю "
+                    f"{source.username or source.id}: попытка {attempt}/3: {error}"
+                )
+                if attempt < 3:
+                    await restore_connection(error)
+                    await asyncio.sleep(attempt * 30)
+        raise last_error
+
+    def _story_file_id(story):
+        media = getattr(story, "photo", None) or getattr(story, "video", None)
+        return getattr(media, "file_id", None)
+
+    def _story_identity(story):
+        media = getattr(story, "photo", None) or getattr(story, "video", None)
+        return getattr(media, "file_unique_id", None) or getattr(media, "file_id", None)
+
+    async def _already_published(story):
+        # Detect a successful send whose network response was lost.
+        identity = _story_identity(story)
+        if not identity:
+            return False
+        try:
+            own_stories = [item async for item in app.get_pinned_stories(app.me.id)]
+        except (RPCError, ConnectionError, OSError):
+            return False
+        return any(_story_identity(item) == identity for item in own_stories)
+
+    async def send_story_with_retry(full_story_cloner, source, source_story_id):
+        # Resolve fresh source media before every retry: Telegram file
+        # references expire while a scheduled story queue is waiting.
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                current = await get_full_story_history(source)
+                story = next((item for item in current if item.id == source_story_id), None)
+                if not story:
+                    raise RuntimeError(f"история {source_story_id} больше недоступна у источника")
+                file_id = _story_file_id(story)
+                if not file_id:
+                    raise RuntimeError(f"у истории {source_story_id} нет копируемого медиа")
+                return await app.send_story(
+                    chat_id="me",
+                    media=file_id,
+                    caption=story.caption,
+                    period=full_story_cloner.publish_duration * 3600,
+                    pinned=full_story_options(app.me.id, full_story_cloner.interval)[2],
+                    protect_content=full_story_cloner.is_copy_prohibited,
+                )
+            except (FloodWait, AuthKeyUnregistered, SessionRevoked, UserDeactivated):
+                raise
+            except (RPCError, ConnectionError, OSError) as error:
+                last_error = error
+                # A connection can break after Telegram accepts publication.
+                # Compare media before retrying, to avoid a duplicate.
+                try:
+                    if 'story' in locals() and await _already_published(story):
+                        print(f"[full_story_cloner/{app.me.id}] История {source_story_id} уже опубликована; фиксирую без дубля")
+                        return None
+                except Exception:
+                    pass
+                print(
+                    f"[full_story_cloner/{app.me.id}] Не удалось опубликовать историю {source_story_id}: "
+                    f"попытка {attempt}/3: {error}"
+                )
+                if attempt < 3:
+                    await restore_connection(error)
+                    await asyncio.sleep(attempt * 30)
+        raise last_error
+
     while True:
         try:
             active_full_story_cloner = db.FullStoryCloner.get_by_account_id(app.me.id)
             for full_story_cloner in active_full_story_cloner:
-                async for story in app.get_pinned_stories(full_story_cloner.username):
+                source = await app.get_users(full_story_cloner.username)
+                # Full cloning means the source's whole published-story history.
+                # Telegram does not guarantee order, so publish explicitly from
+                # newest to oldest.
+                stories = await get_full_story_history(source)
+                print(
+                    f"[full_story_cloner/{app.me.id}] Источник "
+                    f"{source.username or source.id}: историй={len(stories)}, "
+                    f"уже скопировано={len(full_story_cloner.copied)}, "
+                    f"порядок ID={[story.id for story in stories]}"
+                )
+                if not stories:
+                    # A user may prepare the full copy before the source posts.
+                    # Keep the task enabled and try again on the next pass.
+                    continue
+                for story in stories:
                     if story.id in full_story_cloner.copied:
                         continue  # Пропускаем уже скопированные истории
                     # Проверяем настройки пропуска историй с "@"
                     if full_story_cloner.skip_stories_with_at and story.caption and "@" in story.caption:
                         continue  # Пропускаем историю, если в подписи есть "@"
-                    # Получаем ID файла из истории
-                    file_id = getattr(story.photo, 'file_id', None) or getattr(story.video, 'file_id', None)
-                    if not file_id:
-                        continue
-                    # Отправляем историю себе
-                    await app.send_story(
-                        chat_id="<REDACTED>"
-                        media=file_id,
-                        caption=story.caption,
-                        period=full_story_cloner.publish_duration * 3600,
-                        pinned=True,
-                        protect_content=full_story_cloner.is_copy_prohibited
-                    )
+                    # Resolve current media just before sending; source file
+                    # references expire while the scheduled queue is waiting.
+                    await send_story_with_retry(full_story_cloner, source, story.id)
                     db.Analytics.create_record(
                         app.me.id,
-                        'Скопировал закрепленную историю',
+                        'Скопировал опубликованную историю',
                         details=f"Источник: {full_story_cloner.username}"
                     )
                     full_story_cloner.copied.append(story.id)
                     db.FullStoryCloner.update_by_id(full_story_cloner.id, copied=full_story_cloner.copied)
-                    for _ in range(full_story_cloner.interval):
+                    minimum, maximum, _ = full_story_options(app.me.id, full_story_cloner.interval)
+                    for _ in range(random.randint(minimum, maximum)):
                         await asyncio.sleep(60)
                         active_full_story_cloner = db.FullStoryCloner.get_by_account_id(app.me.id)
                         if not active_full_story_cloner or active_full_story_cloner[0].id != full_story_cloner.id:
@@ -215,15 +356,20 @@ async def full_story_cloner_work(app: Client):
                     if not active_full_story_cloner or active_full_story_cloner[0].id != full_story_cloner.id:
                         break
                 else:
-                    db.FullStoryCloner.delete_by_id(full_story_cloner.id)
+                    # Preserve the job after the current batch. Future stories
+                    # must be discovered and copied during later polling passes.
+                    continue
         except FloodWait as e:
             await asyncio.sleep(e.value)
         except RPCError as e:
+            await restore_connection(e)
             await asyncio.sleep(60)
         except (AuthKeyUnregistered, SessionRevoked, UserDeactivated) as e:
             await modules.accounts_storage.de_launch_account(app.me.id)
             return
         except Exception as e:
-            print(f"FullStoryCloner Unexpected error: {e}")
+            print(f"[full_story_cloner/{app.me.id}] Unexpected error: {e}")
+            if isinstance(e, (ConnectionError, OSError)) or "connection" in str(e).lower():
+                await restore_connection(e)
         # Ждем перед следующей проверкой
         await asyncio.sleep(60)

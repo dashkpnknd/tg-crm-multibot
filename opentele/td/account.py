@@ -981,7 +981,7 @@ class Account(BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
     ) -> tl.TelegramClient:
         pass
 
@@ -991,7 +991,7 @@ class Account(BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         *,
         connection: typing.Type[Connection] = ConnectionTcpFull,
         use_ipv6: bool = False,
@@ -1016,7 +1016,7 @@ class Account(BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         **kwargs,
     ) -> tl.TelegramClient:
 
@@ -1036,7 +1036,7 @@ class Account(BaseObject):
         telethonClient: tl.TelegramClient,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         owner: td.TDesktop = None,
     ):
 

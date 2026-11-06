@@ -1,3 +1,4 @@
+from runtime_config import ACCOUNT_API_HASH
 from pyrogram import Client
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -86,8 +87,8 @@ async def wait_proxy_input(client: Client, message: Message):
         # Проверяем прокси
         test_client = Client(
             name="test_proxy",
-            api_id="<REDACTED>"
-            api_hash="<REDACTED>"
+            api_id=2040,
+            api_hash=ACCOUNT_API_HASH,
             proxy=proxy,
             in_memory=True
         )

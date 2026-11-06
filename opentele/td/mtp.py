@@ -115,7 +115,7 @@ class MTP(BaseObject):  # nocov
                 ip = stream.readRawData(ipSize).decode("ascii")
 
                 kMaxSecretSize = 32
-                secret = "<REDACTED>"
+                secret = bytes()
                 if version > 0:
                     secretSize = stream.readInt32()
 
@@ -127,7 +127,7 @@ class MTP(BaseObject):  # nocov
                     )
 
                     if secretSize > 0:
-                        secret = "<REDACTED>"
+                        secret = stream.readRawData(secretSize)
 
                 ExpectStreamStatus(stream, "Could not stream config data")
 
@@ -244,7 +244,7 @@ class MTP(BaseObject):  # nocov
                 flags: MTP.DcOptions.Flag,
                 ip: str,
                 port: int,
-                secret: "<REDACTED>"
+                secret: bytes,
             ) -> None:
                 self.id = id
                 self.flags = flags

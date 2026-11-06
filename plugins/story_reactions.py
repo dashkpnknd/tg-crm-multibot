@@ -207,6 +207,10 @@ async def story_reactions_work(app: Client):
         story_key = get_story_key(chat_id, story_id)
         cursor.execute("INSERT OR IGNORE INTO processed_stories (story_id) VALUES (?)", (story_key,))
         await app.storage.save()
+    async def run_story_api(coro):
+        async with app.story_api_lock:
+            return await coro
+
     await create_table()
     await normalize_table()
     while True:
@@ -236,17 +240,20 @@ async def story_reactions_work(app: Client):
                 checked_dialogs += 1
                 if checked_dialogs % 25 == 0:
                     print(f"[story_reactions/{account_id}] Проверено диалогов: {checked_dialogs}, найдено сторис: {found_stories}, лайков: {liked_stories}")
-                async for story in app.get_chat_stories(dialog.chat.id):
+                async with app.story_api_lock:
+                    dialog_stories = [story async for story in app.get_chat_stories(dialog.chat.id)]
+
+                for story in dialog_stories:
                     found_stories += 1
                     if await is_story_processed(dialog.chat.id, story.id):
                         continue
                     emoji = random.choice(reaction_emojis)
                     try:
-                        await app.send_reaction(
-                            chat_id="<REDACTED>"
+                        await run_story_api(app.send_reaction(
+                            chat_id=dialog.chat.id,
                             story_id=story.id,
                             emoji=emoji
-                        )
+                        ))
                         chat_name = dialog.chat.username or dialog.chat.first_name or dialog.chat.title or dialog.chat.id
                         db.Analytics.create_record(
                             app.me.id,

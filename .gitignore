@@ -25,3 +25,6 @@ __pycache__/
 *.pyc
 ._*
 .DS_Store
+*.log
+report_channel.txt
+test.py

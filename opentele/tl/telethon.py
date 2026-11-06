@@ -20,7 +20,7 @@ from typing import Awaitable
 class CustomInitConnectionRequest(functions.InitConnectionRequest):
     def __init__(
         self,
-        api_id: "<REDACTED>"
+        api_id: int,
         device_model: str,
         system_version: str,
         app_version: str,
@@ -124,8 +124,8 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         self,
         session: Union[str, Session] = None,
         api: Union[Type[APIData], APIData] = None,
-        api_id: "<REDACTED>"
-        api_hash: "<REDACTED>"
+        api_id: int = 0,
+        api_hash: str = None,
         *,
         connection: typing.Type[Connection] = ConnectionTcpFull,
         use_ipv6: bool = False,
@@ -304,8 +304,8 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         self,
         session: Union[str, Session] = None,
         api: Union[Type[APIData], APIData] = None,
-        api_id: "<REDACTED>"
-        api_hash: "<REDACTED>"
+        api_id: int = 0,
+        api_hash: str = None,
         **kwargs,
     ):
         # Use API.TelegramDesktop by default.
@@ -316,8 +316,8 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
                 and APIData.__subclasscheck__(api)
                 and api != APIData
             ):
-                api_id = "<REDACTED>"
-                api_hash = "<REDACTED>"
+                api_id = api.api_id
+                api_hash = api.api_hash
 
                 # pass our hook id through the device_model
                 kwargs["device_model"] = api.pid  # type: ignore
@@ -328,14 +328,14 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
                     and api_id
                     and isinstance(api_id, str)
                 ):
-                    api_id = "<REDACTED>"
-                    api_hash = "<REDACTED>"
+                    api_id = api
+                    api_hash = api_id
                 api = None
 
         elif api_id == 0 and api_hash == None:
             api = API.TelegramDesktop
-            api_id = "<REDACTED>"
-            api_hash = "<REDACTED>"
+            api_id = api.api_id
+            api_hash = api.api_hash
 
             # pass our hook id through the device_model
             kwargs["device_model"] = api.pid  # type: ignore
@@ -482,7 +482,7 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         self,
         session: Union[str, Session] = None,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
     ) -> TelegramClient:
         """
         Create a new session using the current session.
@@ -526,7 +526,7 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         self,
         session: Union[str, Session] = None,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         *,
         connection: typing.Type[Connection] = ConnectionTcpFull,
         use_ipv6: bool = False,
@@ -550,7 +550,7 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         self,
         session: Union[str, Session] = None,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         **kwargs,
     ) -> TelegramClient:
 
@@ -705,7 +705,7 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         self,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
     ) -> td.TDesktop:
         """
         Convert this instance of `TelegramClient` to `TDesktop`
@@ -752,7 +752,7 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
     ) -> TelegramClient:
         """
         
@@ -798,7 +798,7 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         *,
         connection: typing.Type[Connection] = ConnectionTcpFull,
         use_ipv6: bool = False,
@@ -824,7 +824,7 @@ class TelegramClient(telethon.TelegramClient, BaseObject):
         session: Union[str, Session] = None,
         flag: Type[LoginFlag] = CreateNewSession,
         api: Union[Type[APIData], APIData] = API.TelegramDesktop,
-        password: "<REDACTED>"
+        password: str = None,
         **kwargs,
     ) -> TelegramClient:
 
