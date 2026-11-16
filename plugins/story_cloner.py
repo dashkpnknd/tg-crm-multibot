@@ -62,7 +62,7 @@ def copy_story_cloner_config(source_config):
     return {key: source_config.get(key) for key in STORY_CLONER_CONFIG_KEYS}
 
 
-async def send_story_to_channel(app, channel_id, story, media, caption, publish_period, protect_content):
+async def send_story_to_channel(app, channel_id, story, media, caption, publish_period, protect_content, pinned=False):
     if not channel_id:
         return None
 
@@ -71,7 +71,7 @@ async def send_story_to_channel(app, channel_id, story, media, caption, publish_
         media=media,
         caption=caption,
         period=publish_period,
-        pinned=False,
+        pinned=pinned,
         protect_content=protect_content
     )
 
@@ -788,6 +788,44 @@ async def story_cloner_work(app: Client):
         await app.storage.save()
         return cursor.rowcount > 0
 
+    async def record_channel_story_target(user_id, story_id, channel_id, target_story_id):
+        cursor.execute("""
+            UPDATE channel_stories SET target_story_id = ?
+            WHERE user_id = ? AND story_id = ? AND channel_id = ?
+        """, (int(target_story_id), user_id, story_id, str(channel_id)))
+        await app.storage.save()
+
+    async def ensure_channel_pin(channel_id, story_id):
+        async with app.story_api_lock:
+            pinned = {int(item.id) async for item in app.get_pinned_stories(channel_id)}
+            if int(story_id) not in pinned:
+                await app.pin_chat_stories(channel_id, [int(story_id)])
+                pinned = {int(item.id) async for item in app.get_pinned_stories(channel_id)}
+        if int(story_id) not in pinned:
+            raise RuntimeError(f"Telegram did not confirm channel story pin: {channel_id}/{story_id}")
+
+    async def retry_channel_pins(config):
+        if not config.get("pin_channel_stories", False):
+            return
+        channel_ids = {str(channel_id) for channel_id in parse_channel_ids(config.get("copy_channel_id"))}
+        cursor.execute("""
+            SELECT user_id, story_id, channel_id, target_story_id
+            FROM channel_stories
+            WHERE target_story_id IS NOT NULL AND pin_confirmed = 0
+        """)
+        for user_id, story_id, channel_id, target_story_id in cursor.fetchall():
+            if channel_id not in channel_ids:
+                continue
+            try:
+                await ensure_channel_pin(channel_id, target_story_id)
+                cursor.execute("""
+                    UPDATE channel_stories SET pin_confirmed = 1
+                    WHERE user_id = ? AND story_id = ? AND channel_id = ?
+                """, (user_id, story_id, channel_id))
+                await app.storage.save()
+            except Exception as error:
+                print(f"[story_cloner/{app.me.id}] Не удалось закрепить историю {target_story_id} в канале {channel_id}: {error}")
+
     async def run_story_api(coro):
         async with app.story_api_lock:
             return await coro
@@ -878,6 +916,12 @@ async def story_cloner_work(app: Client):
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        cursor.execute("PRAGMA table_info(channel_stories)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "target_story_id" not in columns:
+            cursor.execute("ALTER TABLE channel_stories ADD COLUMN target_story_id INTEGER")
+        if "pin_confirmed" not in columns:
+            cursor.execute("ALTER TABLE channel_stories ADD COLUMN pin_confirmed INTEGER NOT NULL DEFAULT 0")
         cursor.execute("""
             DELETE FROM channel_stories
             WHERE id NOT IN (
@@ -1008,15 +1052,24 @@ async def story_cloner_work(app: Client):
 
             print(f"[story_cloner/{app.me.id}] Отправляю историю {story.id} из {user_obj.id} в канал {channel_id}")
             try:
-                await run_story_api(send_story_to_channel(
+                sent_story = await run_story_api(send_story_to_channel(
                     app,
                     channel_id,
                     story,
                     story_file_id,
                     story.caption,
                     publish_period,
-                    config.get("is_copy_prohibited", False)
+                    config.get("is_copy_prohibited", False),
+                    pinned=bool(config.get("pin_channel_stories", False))
                 ))
+                if config.get("pin_channel_stories", False):
+                    await record_channel_story_target(user_obj.id, story.id, channel_id, sent_story.id)
+                    await ensure_channel_pin(channel_id, sent_story.id)
+                    cursor.execute("""
+                        UPDATE channel_stories SET pin_confirmed = 1
+                        WHERE user_id = ? AND story_id = ? AND channel_id = ?
+                    """, (user_obj.id, story.id, str(channel_id)))
+                    await app.storage.save()
                 db.Analytics.create_record(
                     app.me.id,
                     'Скопировал историю в канал',
@@ -1040,6 +1093,7 @@ async def story_cloner_work(app: Client):
         try:
             account = db.Account.get_by_id(app.me.id)
             config = account.config or {}
+            await retry_channel_pins(config)
             blocked_channels = set()
             copy_to_account_enabled = config.get('is_copying_enabled', False)
             copy_to_channel_enabled = config.get("copy_to_channel_enabled", False) and bool(parse_channel_ids(config.get("copy_channel_id")))
