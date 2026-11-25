@@ -767,6 +767,27 @@ async def bulk_apply_story_cloner(client: Client, callback_query: CallbackQuery)
 async def story_cloner_work(app: Client):
     cursor = app.storage.conn.cursor()
 
+    async def restore_connection(reason):
+        # A closed TCP stream can leave Pyrogram marked as connected. Retrying
+        # requests on that client only repeats the same BrokenPipeError.
+        print(f"[story_cloner/{app.me.id}] Reconnecting after {type(reason).__name__}: {reason}")
+        for attempt in range(1, 4):
+            try:
+                if app.is_connected:
+                    await app.disconnect()
+                await asyncio.sleep(attempt)
+                await app.connect()
+                await app.get_me()
+                return True
+            except (AuthKeyUnregistered, SessionRevoked, UserDeactivated):
+                raise
+            except (RPCError, ConnectionError, OSError) as reconnect_error:
+                print(
+                    f"[story_cloner/{app.me.id}] Reconnect attempt {attempt}/3 failed: "
+                    f"{reconnect_error}"
+                )
+        return False
+
     async def reserve_story(user_id, story_id):
         cursor.execute("""
             INSERT OR IGNORE INTO stories (user_id, story_id, my_story_id) VALUES (?, ?, 0);
@@ -1194,6 +1215,13 @@ async def story_cloner_work(app: Client):
                     return
                 except Exception as e:
                     print(f"[story_cloner/{app.me.id}] Unexpected error source={user}: {e}")
+                    if isinstance(e, (ConnectionError, OSError)):
+                        try:
+                            await restore_connection(e)
+                        except (AuthKeyUnregistered, SessionRevoked, UserDeactivated) as auth_error:
+                            print(f"[story_cloner/{app.me.id}] Authorization lost: {auth_error}")
+                            await modules.accounts_storage.de_launch_account(app.me.id)
+                            return
                     await asyncio.sleep(60)
 
         except Exception as e:
